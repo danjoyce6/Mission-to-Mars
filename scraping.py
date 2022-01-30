@@ -1,104 +1,122 @@
-#!/usr/bin/env python
-# coding: utf-8
-# In[33]:
-# Import Splinter and BeautifulSoup
 from splinter import Browser
 from bs4 import BeautifulSoup as soup
-from webdriver_manager.chrome import ChromeDriverManager
 import pandas as pd
-# In[21]:
-# Set up Splinter
-executable_path = {'executable_path': ChromeDriverManager().install()}
-browser = Browser('chrome', **executable_path, headless=False)
-# In[22]:
-# Visit the mars nasa news site
-url = 'https://redplanetscience.com/'
-browser.visit(url)
-# Optional delay for loading the page
-browser.is_element_present_by_css('div.list_text', wait_time=1)
+from webdriver_manager.chrome import ChromeDriverManager
+import datetime as dt
 
-# In[23]:
+def scrape_all():
+    # Initiate headless driver for deployment
+    executable_path = {'executable_path': ChromeDriverManager().install()}
+    browser = Browser('chrome', **executable_path, headless=True)
 
-html = browser.html
-news_soup = soup(html, 'html.parser')
-slide_elem = news_soup.select_one('div.list_text')
+    news_title, news_paragraph = mars_news(browser)
 
-# In[24]:
+    # Run all scraping functions and store results in dictionary
+    data = {
+        "news_title": news_title,
+        "news_paragraph": news_paragraph,
+        "featured_image": featured_image(browser),
+        "facts": mars_facts(),
+        "last_modified": dt.datetime.now(),
+        "hemispheres": mars_hemis(browser)
+    }
+    
+    # Stop webdriver and return data
+    browser.quit()
+    return data
 
-slide_elem.find('div', class_='content_title')
+def mars_news(browser):
+    # Visit the Mars news site
+    url = 'https://redplanetscience.com/'
+    browser.visit(url)
+    # Optional delay for loading the page
+    browser.is_element_present_by_css('div.list_text', wait_time=1)
+    # Convert the browser html to a soup object and then quit the browser
+    html = browser.html
+    news_soup = soup(html, 'html.parser')
 
-# In[25]:
+    try:
+        slide_elem = news_soup.select_one('div.list_text')
+        # Use the parent element to find the first a tag and save it as `news_title`
+        news_title = slide_elem.find('div', class_='content_title').get_text()
+        # Use the parent element to find the paragraph text
+        news_p = slide_elem.find('div', class_='article_teaser_body').get_text()
 
-# Use the parent element to find the first `a` tag and save it as `news_title`
-news_title = slide_elem.find('div', class_='content_title').get_text()
-news_title
-
-# In[26]:
-
-# Use the parent element to find the paragraph text
-news_p = slide_elem.find('div', class_='article_teaser_body').get_text()
-news_p
-
-
-# ### Featured Images
-
-# In[27]:
-
-
-# Visit URL
-url = 'https://spaceimages-mars.com'
-browser.visit(url)
-
-
-# In[29]:
-
-
-# Find and click the full image button
-full_image_elem = browser.find_by_tag('button')[1]
-full_image_elem.click()
+    except AttributeError:
+        return None, None
+    
+    return news_title, news_p
 
 
-# In[30]:
+# ## JPL Space Images Featured Image
+
+def featured_image(browser):
+    # Visit URL
+    url = 'https://spaceimages-mars.com'
+    browser.visit(url)
+
+    # Find and click the full image button
+    full_image_elem = browser.find_by_tag('button')[1]
+    full_image_elem.click()
+
+    # Parse the resulting html with soup
+    html = browser.html
+    img_soup = soup(html, 'html.parser')
+
+    # Add try/except for error handling
+    try:
+        # Find the relative image url
+        img_url_rel = img_soup.find('img', class_='fancybox-image').get('src')
+
+    except AttributeError:
+        return None
+
+    # Use the base url to create an absolute url
+    img_url = f'https://spaceimages-mars.com/{img_url_rel}'
+
+    return img_url
 
 
-# Parse the resulting html with soup
-html = browser.html
-img_soup = soup(html, 'html.parser')
+def mars_facts():
+    # Add try/except for error handling
+    try:
+        # Use 'read_html' to scrape the facts table into a dataframe
+        df = pd.read_html('https://galaxyfacts-mars.com')[0]
 
+    except BaseException:
+        return None
 
-# In[31]:
+    # Assign columns and set index of dataframe
+    df.columns=['Description', 'Mars', 'Earth']
+    df.set_index('Description', inplace=True)
 
+    # Convert dataframe into HTML format, add bootstrap
+    return df.to_html()
 
-# Find the relative image url
-img_url_rel = img_soup.find('img', class_='fancybox-image').get('src')
-img_url_rel
+def mars_hemis(browser):
+    url = 'https://marshemispheres.com/' 
+    hemisphere_image_urls = []
 
+    try:
+        for img in range(0,4):
+            browser.visit(url)
+            hemi_img = browser.find_by_tag('h3')[img]
+            hemi_img.click()
+            html = browser.html
+            hemi_img_soup = soup(html, 'html.parser')
+            hemi_img = hemi_img_soup.find('img', class_= 'wide-image').get('src')
+            img_url = 'https://marshemispheres.com/' + hemi_img
+            #print(hemi_img_url)
+            hemi_img_title = hemi_img_soup.find('h2', class_= 'title').get_text()
+            #print(hemi_img_title)
+            output_dict = {'img_url': img_url, 'title': hemi_img_title}
+            hemisphere_image_urls.append(output_dict)
+    
+    except AttributeError:
+        return None
 
-# In[32]:
+    return hemisphere_image_urls
 
-
-# Use the base URL to create an absolute URL
-img_url = f'https://spaceimages-mars.com/{img_url_rel}'
-img_url
-
-
-# In[35]:
-
-
-df = pd.read_html('https://galaxyfacts-mars.com')[0]
-df.columns=['description', 'Mars', 'Earth']
-df.set_index('description', inplace=True)
-df.to_html()
-
-
-# In[36]:
-
-
-browser.quit()
-
-
-# In[ ]:
-
-
-
-
+if __name__ == "__main__":
+    # If running as script, print scraped data
+    print(scrape_all())
